@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 
 # 先ほど作成したmodels.pyからAppモデルをインポート
@@ -6,6 +7,27 @@ from .models import App
 
 # FastAPIアプリケーションのインスタンスを作成
 app = FastAPI(title="Cat-box API")
+
+# app = FastAPI(...) の下に追記
+
+# --- CORS設定 ---
+# 開発中にローカルのフロントエンドやランチャーからアクセスできるようにするため、
+# 特定のオリジンからのリクエストを許可する。
+origins = [
+    "http://localhost",
+    "http://localhost:3000", # 一般的なフロントエンド開発サーバー
+    "http://localhost:8080", # 一般的なフロントエンド開発サーバー
+    # 必要に応じて、将来のWebサイトのドメインなどもここに追加する
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"], # 全てのHTTPメソッドを許可 (GET, POST, etc.)
+    allow_headers=["*"], # 全てのヘッダーを許可
+)
+# --- CORS設定ここまで ---
 
 # --- ダミーデータ ---
 # ステップ1-2で定義したAppモデルに従った、ハードコードされたデータ。
