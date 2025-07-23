@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 
 # 先ほど作成したmodels.pyからAppモデルをインポート
-from .models import App
+from models import App
 
 # FastAPIアプリケーションのインスタンスを作成
 app = FastAPI(title="Cat-box API")
