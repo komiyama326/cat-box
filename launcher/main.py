@@ -1,10 +1,34 @@
 import sys
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
-    QHBoxLayout, QVBoxLayout, QListWidget,
+    QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem,
     QTextEdit, QLabel, QPushButton, QSplitter
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, QObject, Signal, Slot
+
+# 作成したAPIクライアントをインポート
+from api_client import ApiClient
+
+# --- バックグラウンドでAPI通信を行うワーカークラス ---
+class ApiWorker(QObject):
+    """API通信を別スレッドで実行するためのワーカー"""
+    # シグナルの定義: 成功時にアプリリスト(list)、失敗時にエラーメッセージ(str)を渡す
+    succeeded = Signal(list)
+    failed = Signal(str)
+
+    def __init__(self, api_client):
+        super().__init__()
+        self.api_client = api_client
+
+    @Slot()
+    def fetch_app_list(self):
+        """アプリリストを取得するタスク"""
+        try:
+            apps = self.api_client.get_app_list()
+            self.succeeded.emit(apps)
+        except Exception as e:
+            self.failed.emit(str(e))
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -12,54 +36,109 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Cat-box Launcher")
         self.resize(800, 600)
 
-        # --- メインとなるウィジェットとレイアウトの作成 ---
+        self.apps_data = [] # APIから取得したアプリの全データを保持するリスト
+
+        # --- UIウィジェットのセットアップ (ステップ2-3とほぼ同じ) ---
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
-        # 水平方向に分割するスプリッター (左:アプリ一覧 | 右:詳細)
         top_splitter = QSplitter(Qt.Horizontal)
         
-        # --- 左側のエリア (アプリ一覧) ---
+        # 左側: アプリ一覧
         self.app_list_widget = QListWidget()
-        # ダミーデータを追加して見た目を確認
-        self.app_list_widget.addItems(["Super Shift App", "Simple Memo Pad", "Weather Cat"])
+        self.app_list_widget.currentItemChanged.connect(self._on_app_selection_changed) # アイテム選択時の処理を接続
         top_splitter.addWidget(self.app_list_widget)
 
-        # --- 右側のエリア (アプリ詳細) ---
+        # 右側: アプリ詳細
         app_details_widget = QWidget()
         details_layout = QVBoxLayout(app_details_widget)
-        details_layout.setAlignment(Qt.AlignTop) # ウィジェットを上寄せにする
-        
+        details_layout.setAlignment(Qt.AlignTop)
         self.app_name_label = QLabel("アプリ名: (アプリを選択してください)")
         self.app_version_label = QLabel("バージョン: ")
         self.app_description_label = QLabel("説明: ")
-        self.app_description_label.setWordWrap(True) # 長い説明は折り返す
-        
+        self.app_description_label.setWordWrap(True)
         self.launch_button = QPushButton("起動")
-        self.launch_button.setEnabled(False) # 最初は押せないようにしておく
-        
+        self.launch_button.setEnabled(False)
         details_layout.addWidget(self.app_name_label)
         details_layout.addWidget(self.app_version_label)
         details_layout.addWidget(self.app_description_label)
-        details_layout.addStretch() # スペーサーを入れてボタンを一番下に配置
+        details_layout.addStretch()
         details_layout.addWidget(self.launch_button)
-
         top_splitter.addWidget(app_details_widget)
-        
-        # スプリッターの初期サイズを設定 (左側が200px, 右側が600px)
         top_splitter.setSizes([200, 600])
 
-        # --- 下部のエリア (ログ) ---
+        # 下部: ログ
         self.log_text_edit = QTextEdit()
-        self.log_text_edit.setReadOnly(True) # ユーザーが編集できないようにする
-        self.log_text_edit.setMaximumHeight(150) # 高さを制限
-        self.log_text_edit.append("ランチャーを起動しました。")
+        self.log_text_edit.setReadOnly(True)
+        self.log_text_edit.setMaximumHeight(150)
 
-        # --- 全体のレイアウト (垂直方向) ---
+        # 全体のレイアウト
         main_layout = QVBoxLayout(central_widget)
         main_layout.addWidget(top_splitter)
         main_layout.addWidget(self.log_text_edit)
 
+        # --- 非同期処理のセットアップ ---
+        self.setup_api_worker()
+        self.log("ランチャーを起動しました。")
+        self.fetch_apps() # ランチャー起動時にアプリ取得を開始
+
+    def setup_api_worker(self):
+        """ワーカースレッドとシグナル・スロットを設定する"""
+        self.thread = QThread()
+        api_client = ApiClient()
+        self.worker = ApiWorker(api_client)
+        self.worker.moveToThread(self.thread)
+
+        # シグナルとスロットを接続
+        self.worker.succeeded.connect(self._on_fetch_success)
+        self.worker.failed.connect(self._on_fetch_failure)
+        self.thread.started.connect(self.worker.fetch_app_list)
+        self.worker.succeeded.connect(self.thread.quit)
+        self.worker.failed.connect(self.thread.quit)
+        
+        # メモリリークを防ぐため、スレッド終了後にオブジェクトを削除
+        self.thread.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        
+    def fetch_apps(self):
+        """アプリリストの取得を開始する"""
+        self.app_list_widget.clear()
+        self.log("アプリリストを取得中...")
+        self.thread.start()
+
+    def log(self, message):
+        """ログエリアにメッセージを追記する"""
+        self.log_text_edit.append(message)
+
+    # --- スロット (シグナルによって呼び出されるメソッド) ---
+    @Slot(list)
+    def _on_fetch_success(self, apps):
+        """アプリ取得成功時の処理"""
+        self.log(f"正常にアプリリストを取得しました。({len(apps)}件)")
+        self.apps_data = apps
+        self.app_list_widget.clear()
+        for app_data in self.apps_data:
+            # QListWidgetItemに表示名だけでなく、辞書データ全体を関連付ける
+            item = QListWidgetItem(app_data['name'])
+            item.setData(Qt.UserRole, app_data) # UserRoleにデータを保存
+            self.app_list_widget.addItem(item)
+
+    @Slot(str)
+    def _on_fetch_failure(self, error_message):
+        """アプリ取得失敗時の処理"""
+        self.log(f"エラー: {error_message}")
+
+    @Slot(QListWidgetItem)
+    def _on_app_selection_changed(self, current_item):
+        """アプリ一覧で選択項目が変わった時の処理"""
+        if not current_item:
+            return
+
+        # アイテムに保存しておいたアプリデータを取得
+        app_data = current_item.data(Qt.UserRole)
+        self.app_name_label.setText(f"アプリ名: {app_data.get('name', 'N/A')}")
+        self.app_version_label.setText(f"バージョン: {app_data.get('version', 'N/A')}")
+        self.app_description_label.setText(f"説明: {app_data.get('description', 'N/A')}")
+        self.launch_button.setEnabled(True)
 
 def main():
     app = QApplication(sys.argv)
