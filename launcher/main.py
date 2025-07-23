@@ -1,4 +1,4 @@
-import sys
+import sys, subprocess
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem,
@@ -58,6 +58,7 @@ class MainWindow(QMainWindow):
         self.app_description_label.setWordWrap(True)
         self.launch_button = QPushButton("起動")
         self.launch_button.setEnabled(False)
+        self.launch_button.clicked.connect(self._launch_app)
         details_layout.addWidget(self.app_name_label)
         details_layout.addWidget(self.app_version_label)
         details_layout.addWidget(self.app_description_label)
@@ -139,6 +140,45 @@ class MainWindow(QMainWindow):
         self.app_version_label.setText(f"バージョン: {app_data.get('version', 'N/A')}")
         self.app_description_label.setText(f"説明: {app_data.get('description', 'N/A')}")
         self.launch_button.setEnabled(True)
+        
+    @Slot()
+    def _launch_app(self):
+        """選択されているアプリを起動する"""
+        current_item = self.app_list_widget.currentItem()
+        if not current_item:
+            self.log("エラー: 起動するアプリが選択されていません。")
+            return
+
+        app_data = current_item.data(Qt.UserRole)
+        app_name = app_data.get('name', 'Unknown App')
+        
+        # --- ここで実際にプロセスを起動する ---
+        # 【重要】将来的には、ダウンロード＆展開したアプリのパスを指定する
+        # 今回は、テスト用にダミーのPythonスクリプトを起動する
+        # sys.executable は、現在ランチャーを実行しているPythonのパス
+        
+        # 起動するダミーアプリのパス
+        # 注意: このパスはプロジェクトのルートから見た相対パスです。
+        # 実行する場所によっては調整が必要になる場合があります。
+        dummy_app_path = "dummy_app/run.py" 
+        
+        try:
+            self.log(f"'{app_name}' を起動しようとしています...")
+            
+            # subprocess.Popenで非同期にプロセスを起動
+            # 新しいコンソールウィンドウで実行するために creationflags を設定 (Windowsの場合)
+            # Mac/Linuxの場合は、このフラグは不要で、別の方法が必要になることがあります。
+            creationflags = 0
+            if sys.platform == "win32":
+                creationflags = subprocess.CREATE_NEW_CONSOLE
+
+            subprocess.Popen([sys.executable, dummy_app_path, app_name], creationflags=creationflags)
+            
+            self.log(f"'{app_name}' のプロセスを起動しました。")
+        except FileNotFoundError:
+            self.log(f"エラー: 実行ファイルが見つかりません: {dummy_app_path}")
+        except Exception as e:
+            self.log(f"アプリの起動中に予期せぬエラーが発生しました: {e}")            
 
 def main():
     app = QApplication(sys.argv)
