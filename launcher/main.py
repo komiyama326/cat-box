@@ -1,4 +1,6 @@
-import sys, subprocess
+import sys, subprocess, os, zipfile
+import requests
+import sys, subprocess, os, zipfile
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem,
@@ -29,6 +31,47 @@ class ApiWorker(QObject):
         except Exception as e:
             self.failed.emit(str(e))
 
+# --- バックグラウンドでダウンロードを行うワーカークラス ---
+class DownloadWorker(QObject):
+    """ファイルをダウンロードするためのワーカー"""
+    progress = Signal(int)       # 進捗(%)を通知
+    finished = Signal(str)       # 完了時に保存先パスを通知
+    failed = Signal(str)         # 失敗時にエラーメッセージを通知
+
+    def __init__(self, url, save_path):
+        super().__init__()
+        self.url = url
+        self.save_path = save_path
+
+    @Slot()
+    def run(self):
+        """ダウンロードを実行する"""
+        try:
+            response = requests.get(self.url, stream=True, timeout=60)
+            response.raise_for_status()
+
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded_size = 0
+            
+            # 保存先ディレクトリがなければ作成
+            os.makedirs(os.path.dirname(self.save_path), exist_ok=True)
+
+            with open(self.save_path, 'wb') as f:
+                # データを少しずつ（チャンクごと）に書き込む
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+                    downloaded_size += len(chunk)
+                    if total_size > 0:
+                        # 進捗を計算してシグナルで通知
+                        percentage = int((downloaded_size / total_size) * 100)
+                        self.progress.emit(percentage)
+            
+            # 100%を確実に通知
+            self.progress.emit(100)
+            self.finished.emit(self.save_path)
+
+        except Exception as e:
+            self.failed.emit(str(e))
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -58,7 +101,7 @@ class MainWindow(QMainWindow):
         self.app_description_label.setWordWrap(True)
         self.launch_button = QPushButton("起動")
         self.launch_button.setEnabled(False)
-        self.launch_button.clicked.connect(self._launch_app)
+        self.launch_button.clicked.connect(self._on_launch_button_clicked)
         details_layout.addWidget(self.app_name_label)
         details_layout.addWidget(self.app_version_label)
         details_layout.addWidget(self.app_description_label)
@@ -142,44 +185,79 @@ class MainWindow(QMainWindow):
         self.launch_button.setEnabled(True)
         
     @Slot()
-    def _launch_app(self):
-        """選択されているアプリを起動する"""
+    def _on_launch_button_clicked(self):
+        """「起動」ボタンが押されたときのメインロジック"""
         current_item = self.app_list_widget.currentItem()
         if not current_item:
-            self.log("エラー: 起動するアプリが選択されていません。")
             return
 
         app_data = current_item.data(Qt.UserRole)
-        app_name = app_data.get('name', 'Unknown App')
+        download_url = app_data.get('download_url')
+        if not download_url:
+            self.log("エラー: このアプリにはダウンロードURLがありません。")
+            return
         
-        # --- ここで実際にプロセスを起動する ---
-        # 【重要】将来的には、ダウンロード＆展開したアプリのパスを指定する
-        # 今回は、テスト用にダミーのPythonスクリプトを起動する
-        # sys.executable は、現在ランチャーを実行しているPythonのパス
-        
-        # 起動するダミーアプリのパス
-        # 注意: このパスはプロジェクトのルートから見た相対パスです。
-        # 実行する場所によっては調整が必要になる場合があります。
-        dummy_app_path = "dummy_app/run.py" 
-        
-        try:
-            self.log(f"'{app_name}' を起動しようとしています...")
-            
-            # subprocess.Popenで非同期にプロセスを起動
-            # 新しいコンソールウィンドウで実行するために creationflags を設定 (Windowsの場合)
-            # Mac/Linuxの場合は、このフラグは不要で、別の方法が必要になることがあります。
-            creationflags = 0
-            if sys.platform == "win32":
-                creationflags = subprocess.CREATE_NEW_CONSOLE
+        # 将来的には、ここでダウンロード済みかチェックする
+        # 今は毎回ダウンロードを実行する
+        self._start_download(app_data)
 
-            subprocess.Popen([sys.executable, dummy_app_path, app_name], creationflags=creationflags)
-            
-            self.log(f"'{app_name}' のプロセスを起動しました。")
-        except FileNotFoundError:
-            self.log(f"エラー: 実行ファイルが見つかりません: {dummy_app_path}")
-        except Exception as e:
-            self.log(f"アプリの起動中に予期せぬエラーが発生しました: {e}")            
+    def _start_download(self, app_data):
+        """ダウンロードスレッドを開始する"""
+        download_url = app_data['download_url']
+        app_name = app_data['name']
+        
+        # 一時的な保存先パスを決定
+        # APPDATA環境変数を使い、安全な場所に保存する
+        temp_dir = os.path.join(os.getenv('APPDATA'), 'Cat-box', 'temp')
+        save_path = os.path.join(temp_dir, os.path.basename(download_url))
 
+        self.log(f"'{app_name}'のダウンロードを開始します...")
+        self.log(f"URL: {download_url}")
+        self.log(f"保存先: {save_path}")
+
+        # UIをロックして二重クリックなどを防ぐ
+        self.launch_button.setEnabled(False)
+
+        self.download_thread = QThread()
+        self.download_worker = DownloadWorker(download_url, save_path)
+        self.download_worker.moveToThread(self.download_thread)
+
+        # シグナルとスロットを接続
+        self.download_thread.started.connect(self.download_worker.run)
+        self.download_worker.progress.connect(self.on_download_progress)
+        self.download_worker.failed.connect(self.on_download_failed)
+        self.download_worker.finished.connect(self.on_download_finished)
+
+        # スレッドが終了したらクリーンアップ
+        self.download_worker.finished.connect(self.download_thread.quit)
+        self.download_worker.failed.connect(self.download_thread.quit)
+        self.download_thread.finished.connect(self.download_worker.deleteLater)
+        self.download_thread.finished.connect(self.download_thread.deleteLater)
+        
+        self.download_thread.start()
+
+    # --- ダウンロード関連のスロット ---
+    @Slot(int)
+    def on_download_progress(self, percentage):
+        """ダウンロード進捗の更新"""
+        # ログが流れすぎないように、10%ごとか100%の時だけ表示
+        if percentage % 10 == 0 or percentage == 100:
+            self.log(f"ダウンロード中... {percentage}%")
+
+    @Slot(str)
+    def on_download_failed(self, error_message):
+        """ダウンロード失敗時の処理"""
+        self.log(f"ダウンロード失敗: {error_message}")
+        self.launch_button.setEnabled(True) # ボタンを再度有効化
+
+    @Slot(str)
+    def on_download_finished(self, file_path):
+        """ダウンロード完了時の処理"""
+        self.log(f"ダウンロード完了: {file_path}")
+        self.launch_button.setEnabled(True) # ボタンを再度有効化
+        
+        # 次のステップ: ここでzip展開と実行を行う
+        self.log("次のステップで、このファイルを展開・実行します。")
 def main():
     app = QApplication(sys.argv)
     window = MainWindow()
