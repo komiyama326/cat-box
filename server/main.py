@@ -39,7 +39,7 @@ dummy_apps_db = [
         version="1.0.0",
         description="A revolutionary application for managing your work shifts with ease.",
         icon_url="https://placekitten.com/200/200", # かわいい猫のダミー画像
-        download_url="http://example.com/downloads/shift_app_v1.0.0.zip"
+        download_url="https://cat-box-apps-19940623.s3.ap-northeast-1.amazonaws.com/dummy_app.zip"
     ),
     App(
         id=2,
@@ -47,7 +47,7 @@ dummy_apps_db = [
         version="0.9.1",
         description="A very simple memo pad. That's it.",
         icon_url="https://placekitten.com/201/201",
-        download_url="http://example.com/downloads/simple_memo_v0.9.1.zip"
+        download_url="https://cat-box-apps-19940623.s3.ap-northeast-1.amazonaws.com/dummy_app.zip"
     ),
     App(
         id=3,
@@ -55,7 +55,7 @@ dummy_apps_db = [
         version="1.2.0",
         description=None, # OptionalなフィールドはNoneでもOK
         icon_url="https://placekitten.com/202/202",
-        download_url="http://example.com/downloads/weather_cat_v1.2.0.zip"
+        download_url="https://cat-box-apps-19940623.s3.ap-northeast-1.amazonaws.com/dummy_app.zip"
     ),
 ]
 # --- ダミーデータここまで ---
