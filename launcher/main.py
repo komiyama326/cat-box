@@ -1,6 +1,5 @@
-import sys, subprocess, os, zipfile
+import sys, subprocess, os, zipfile, venv
 import requests
-import sys, subprocess, os, zipfile
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem,
@@ -296,7 +295,86 @@ class MainWindow(QMainWindow):
         self.log("次のステップで、このファイルを展開・実行します。")
 
     # MainWindowクラスの中に追加
+    # 古い _unzip_and_execute をこれで置き換える
     def _unzip_and_execute(self, zip_path, app_data):
+        """zipファイルを展開し、専用の仮想環境を構築してアプリを実行する"""
+        app_name = app_data['name']
+        app_version = app_data['version']
+
+        # 1. アプリケーションデータディレクトリを決定
+        base_dir = os.path.join(os.getenv('APPDATA'), 'Cat-box', 'apps')
+        app_dir = os.path.join(base_dir, app_name, app_version)
+        
+        self.log(f"'{app_name}' を '{app_dir}' に展開します...")
+        os.makedirs(app_dir, exist_ok=True)
+
+        # 2. Zipファイルを展開
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(app_dir)
+        self.log("展開が完了しました。")
+
+        # 3. 専用の仮想環境(venv)を構築 (ステップ3-5の核心)
+        venv_dir = os.path.join(app_dir, '.venv')
+        self.log(f"専用の仮想環境を '{venv_dir}' に作成します...")
+        try:
+            # venv.create(venv_dir, with_pip=True)
+            # 上記はブロッキングなので、subprocessで非同期に実行する方がUIに優しい
+            # ここではシンプルさのためにブロッキングで実装するが、将来的にはこれもスレッド化の候補
+            venv.create(venv_dir, with_pip=True)
+            self.log("仮想環境の作成が完了しました。")
+        except Exception as e:
+            self.log(f"仮想環境の作成に失敗しました: {e}")
+            raise
+
+        # 4. 依存ライブラリをインストール
+        requirements_path = os.path.join(app_dir, 'dummy_app', 'requirements.txt') # zip内の構造に依存
+        
+        # OSによってpipとpythonのパスが異なるため、パスを正しく解決
+        if sys.platform == "win32":
+            pip_executable = os.path.join(venv_dir, 'Scripts', 'pip.exe')
+            python_executable = os.path.join(venv_dir, 'Scripts', 'python.exe')
+        else: # macOS, Linux
+            pip_executable = os.path.join(venv_dir, 'bin', 'pip')
+            python_executable = os.path.join(venv_dir, 'bin', 'python')
+
+        if os.path.exists(requirements_path):
+            self.log(f"'requirements.txt' に基づいてライブラリをインストールします...")
+            try:
+                # subprocess.runで同期的にコマンドを実行し、完了を待つ
+                result = subprocess.run(
+                    [pip_executable, 'install', '-r', requirements_path],
+                    capture_output=True, text=True, check=True
+                )
+                self.log("ライブラリのインストールが完了しました。")
+                # 詳細なログが必要な場合は以下を有効化
+                # self.log(f"pip output:\n{result.stdout}")
+            except subprocess.CalledProcessError as e:
+                self.log(f"ライブラリのインストールに失敗しました。")
+                self.log(f"pip error:\n{e.stderr}")
+                raise
+        else:
+            self.log("'requirements.txt' が見つかりませんでした。スキップします。")
+
+        # 5. アプリの実行
+        entry_point_relative = os.path.join('dummy_app', 'run.py')
+        executable_path = os.path.join(app_dir, entry_point_relative)
+        self.log(f"'{executable_path}' を実行します...")
+
+        if not os.path.exists(executable_path):
+            self.log(f"エラー: 実行ファイルが見つかりません: {executable_path}")
+            return
+        
+        try:
+            creationflags = 0
+            if sys.platform == "win32":
+                creationflags = subprocess.CREATE_NEW_CONSOLE
+            
+            # 【重要】作成した仮想環境のPythonを使ってスクリプトを実行する
+            subprocess.Popen([python_executable, executable_path, app_name], creationflags=creationflags)
+            self.log(f"'{app_name}' のプロセスを起動しました。")
+        except Exception as e:
+            self.log(f"アプリの起動中に予期せぬエラーが発生しました: {e}")
+            raise
         """zipファイルを展開し、アプリを実行する"""
         app_name = app_data['name']
         app_version = app_data['version']
