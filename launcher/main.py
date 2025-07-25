@@ -185,6 +185,7 @@ class MainWindow(QMainWindow):
         self.launch_button.setEnabled(True)
         
     @Slot()
+    @Slot()
     def _on_launch_button_clicked(self):
         """「起動」ボタンが押されたときのメインロジック"""
         current_item = self.app_list_widget.currentItem()
@@ -192,15 +193,34 @@ class MainWindow(QMainWindow):
             return
 
         app_data = current_item.data(Qt.UserRole)
-        download_url = app_data.get('download_url')
-        if not download_url:
-            self.log("エラー: このアプリにはダウンロードURLがありません。")
-            return
+        app_name = app_data['name']
+        app_version = app_data['version']
         
-        # 将来的には、ここでダウンロード済みかチェックする
-        # 今は毎回ダウンロードを実行する
-        self._start_download(app_data)
+        # 実行すべきアプリのパスを決定
+        base_dir = os.path.join(os.getenv('APPDATA'), 'Cat-box', 'apps')
+        app_dir = os.path.join(base_dir, app_name, app_version)
+        entry_point_relative = os.path.join('dummy_app', 'run.py') # zipの中の構造に依存
+        executable_path = os.path.join(app_dir, entry_point_relative)
 
+        # 既に展開済みのアプリが存在するかチェック
+        if os.path.exists(executable_path):
+            self.log(f"'{app_name}' は既に存在します。直接起動します。")
+            try:
+                # 存在するアプリを直接実行
+                creationflags = 0
+                if sys.platform == "win32":
+                    creationflags = subprocess.CREATE_NEW_CONSOLE
+                subprocess.Popen([sys.executable, executable_path, app_name], creationflags=creationflags)
+            except Exception as e:
+                self.log(f"既存アプリの起動中にエラー: {e}")
+        else:
+            # 存在しない場合はダウンロードを開始
+            self.log(f"'{app_name}' が見つかりません。ダウンロードを開始します。")
+            download_url = app_data.get('download_url')
+            if not download_url:
+                self.log("エラー: このアプリにはダウンロードURLがありません。")
+                return
+            self._start_download(app_data)
     def _start_download(self, app_data):
         """ダウンロードスレッドを開始する"""
         download_url = app_data['download_url']
@@ -254,10 +274,74 @@ class MainWindow(QMainWindow):
     def on_download_finished(self, file_path):
         """ダウンロード完了時の処理"""
         self.log(f"ダウンロード完了: {file_path}")
-        self.launch_button.setEnabled(True) # ボタンを再度有効化
+        
+        current_item = self.app_list_widget.currentItem()
+        if not current_item:
+            self.log("エラー: アプリ情報が見つかりません。")
+            self.launch_button.setEnabled(True)
+            return
+
+        app_data = current_item.data(Qt.UserRole)
+        
+        try:
+            # zipファイルを展開し、実行する
+            self._unzip_and_execute(file_path, app_data)
+        except Exception as e:
+            self.log(f"アプリの展開または実行中にエラー: {e}")
+        finally:
+            # 成功・失敗にかかわらずボタンを再度有効化
+            self.launch_button.setEnabled(True)
         
         # 次のステップ: ここでzip展開と実行を行う
         self.log("次のステップで、このファイルを展開・実行します。")
+
+    # MainWindowクラスの中に追加
+    def _unzip_and_execute(self, zip_path, app_data):
+        """zipファイルを展開し、アプリを実行する"""
+        app_name = app_data['name']
+        app_version = app_data['version']
+
+        # 1. アプリケーションデータディレクトリを決定 (ステップ3-5)
+        # APPDATA/Cat-box/apps/アプリ名/バージョン/
+        base_dir = os.path.join(os.getenv('APPDATA'), 'Cat-box', 'apps')
+        app_dir = os.path.join(base_dir, app_name, app_version)
+        
+        self.log(f"'{app_name}' を '{app_dir}' に展開します...")
+        os.makedirs(app_dir, exist_ok=True)
+
+        # 2. Zipファイルを展開 (ステップ3-6)
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(app_dir)
+        
+        self.log("展開が完了しました。")
+
+        # 3. 実行ロジック (ステップ3-6)
+        # 【重要】zipファイル内のどのファイルを実行するかを決める必要がある
+        # 今回は、zipを展開した直下にある 'run.py' を実行するルールとする
+        # dummy_app.zipを展開すると、'dummy_app'フォルダができるので、その中の'run.py'を指定
+        entry_point_relative = os.path.join('dummy_app', 'run.py')
+        executable_path = os.path.join(app_dir, entry_point_relative)
+
+        self.log(f"実行ファイルパス: {executable_path}")
+
+        if not os.path.exists(executable_path):
+            self.log(f"エラー: 実行ファイルが見つかりません: {executable_path}")
+            return
+
+        try:
+            self.log(f"'{app_name}' を起動します...")
+            
+            creationflags = 0
+            if sys.platform == "win32":
+                creationflags = subprocess.CREATE_NEW_CONSOLE
+
+            # 展開されたアプリを実行する
+            subprocess.Popen([sys.executable, executable_path, app_name], creationflags=creationflags)
+            
+            self.log(f"'{app_name}' のプロセスを起動しました。")
+        except Exception as e:
+            self.log(f"アプリの起動中に予期せぬエラーが発生しました: {e}")
+            raise # エラーを呼び出し元に伝播させる
 def main():
     app = QApplication(sys.argv)
     window = MainWindow()
