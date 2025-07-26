@@ -5,6 +5,7 @@ import shutil
 import os
 import zipfile # zipファイル操作のため
 import subprocess # 将来のウイルススキャン連携用
+import hashlib # ハッシュ値計算のため
 
 # 同じディレクトリにあるmodels.pyからAppモデルをインポート
 from .models import App
@@ -14,6 +15,11 @@ MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 MAX_FILES_IN_ZIP = 100 # zip内のファイル数上限
 ALLOWED_EXTENSIONS = {'.py', '.txt', '.md', '.json', '.ui', '.qss', '.png', '.jpg', '.jpeg', '.gif'} # 許可する拡張子
 UPLOAD_DIR = "uploads"
+
+# ダミーのブラックリストDB (本来はデータベースやファイルで管理)
+KNOWN_MALWARE_HASHES = {
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" # 空ファイルのSHA-256ハッシュ (テスト用)
+}
 
 # サーバー起動時にアップロード用ディレクトリを作成
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -123,6 +129,36 @@ def run_virus_scan(file_path: str) -> bool:
     print("--- Scan result: OK (Dummy) ---")
     return True
 
+# --- ヘルパー関数に追記 ---
+def check_file_hash(file_path: str) -> bool:
+    """
+    ファイルのSHA-256ハッシュを計算し、ブラックリストに存在しないか確認する。
+    
+    :param file_path: チェック対象のファイルパス
+    :return: ブラックリストに含まれていなければTrue, 含まれていればFalse
+    """
+    print(f"--- Checking file hash for {file_path} ---")
+    sha256_hash = hashlib.sha256()
+    try:
+        with open(file_path, "rb") as f:
+            # メモリを効率的に使うため、ファイルをチャンクで読み込む
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        
+        file_hex_hash = sha256_hash.hexdigest()
+        print(f"--- File hash (SHA-256): {file_hex_hash} ---")
+
+        if file_hex_hash in KNOWN_MALWARE_HASHES:
+            print("--- HASH MATCH: Known malicious file detected! ---")
+            return False
+        else:
+            print("--- HASH OK: File is not on the blacklist. ---")
+            return True
+
+    except IOError as e:
+        print(f"--- ERROR: Could not read file for hashing: {e} ---")
+        return False # ファイルが読めないなど問題があれば安全側に倒す
+
 @app.post("/api/v1/apps/upload")
 async def upload_app(file: UploadFile = File(...)):
     """
@@ -187,6 +223,14 @@ async def upload_app(file: UploadFile = File(...)):
             )
         # --- ウイルススキャンここまで ---
 
+        # --- ここからハッシュ値チェック ---
+        if not check_file_hash(temp_file_path):
+            raise HTTPException(
+                status_code=400,
+                detail="The uploaded file is on the blacklist."
+            )
+        # --- ハッシュ値チェックここまで ---
+
         print(f"Received file: {file.filename}")
         print(f"Content-Type: {file.content_type}")
         print(f"File size: {file_size} bytes")
@@ -199,4 +243,4 @@ async def upload_app(file: UploadFile = File(...)):
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
 
-    return {"filename": file.filename, "content_type": file.content_type, "size": file_size, "inspection_status": "passed", "virus_scan_status": "passed"}
+    return {"filename": file.filename, "content_type": file.content_type, "size": file_size, "inspection_status": "passed", "virus_scan_status": "passed", "hash_check_status": "passed"}
