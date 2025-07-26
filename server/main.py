@@ -1,9 +1,20 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
+import shutil
+import os
 
 # 同じディレクトリにあるmodels.pyからAppモデルをインポート
 from .models import App
+
+# --- 定数を定義 ---
+# 将来的に設定ファイルに移動することも検討
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+UPLOAD_DIR = "uploads" # アップロードされたファイルを一時的に保存するディレクトリ
+
+# サーバー起動時にアップロード用ディレクトリを作成
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+# --- 定数ここまで ---
 
 # FastAPIアプリケーションのインスタンスを作成
 app = FastAPI(title="Cat-box API")
@@ -72,11 +83,42 @@ async def get_apps():
 async def upload_app(file: UploadFile = File(...)):
     """
     アプリケーションのzipファイルをアップロードします。
-    ステップ4-1の時点では、ファイルを受け取って情報を表示するだけです。
+    ファイルサイズとコンテントタイプの検証を追加。
     """
-    print(f"Received file: {file.filename}")
-    print(f"Content-Type: {file.content_type}")
+    # Content-Typeの検証
+    if file.content_type not in ["application/zip", "application/x-zip-compressed"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type: {file.content_type}. Only .zip files are allowed."
+        )
 
-    # ここに今後、ファイルの検証ロジックを追加していく
+    # 一時ファイルに保存してサイズをチェック
+    temp_file_path = os.path.join(UPLOAD_DIR, file.filename)
+    try:
+        # ファイルをチャンクで書き込む
+        with open(temp_file_path, "wb") as buffer:
+            # shutil.copyfileobjはメモリを大量に消費しないため安全
+            shutil.copyfileobj(file.file, buffer)
 
-    return {"filename": file.filename, "content_type": file.content_type}
+        file_size = os.path.getsize(temp_file_path)
+        if file_size > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413, # Payload Too Large
+                detail=f"File size {file_size / 1024 / 1024:.2f} MB exceeds the limit of {MAX_FILE_SIZE / 1024 / 1024} MB."
+            )
+
+        print(f"Received file: {file.filename}")
+        print(f"Content-Type: {file.content_type}")
+        print(f"File size: {file_size} bytes")
+
+        # ここに今後、zip内の検証ロジックを追加していく
+
+    finally:
+        # FastAPIはUploadFileを自動で閉じるが、shutilで使ったファイルポインタは念のため閉じる
+        file.file.close()
+        # 一時ファイルを削除（今はまだ検証だけなので）
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+
+
+    return {"filename": file.filename, "content_type": file.content_type, "size": file_size}
