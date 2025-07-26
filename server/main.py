@@ -1,9 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 
-# 先ほど作成したmodels.pyからAppモデルをインポート
-from models import App
+# 同じディレクトリにあるmodels.pyからAppモデルをインポート
+from .models import App
 
 # FastAPIアプリケーションのインスタンスを作成
 app = FastAPI(title="Cat-box API")
@@ -67,3 +67,16 @@ async def get_apps():
     登録されている全てのアプリケーションのリストを取得します。
     """
     return dummy_apps_db
+
+@app.post("/api/v1/apps/upload")
+async def upload_app(file: UploadFile = File(...)):
+    """
+    アプリケーションのzipファイルをアップロードします。
+    ステップ4-1の時点では、ファイルを受け取って情報を表示するだけです。
+    """
+    print(f"Received file: {file.filename}")
+    print(f"Content-Type: {file.content_type}")
+
+    # ここに今後、ファイルの検証ロジックを追加していく
+
+    return {"filename": file.filename, "content_type": file.content_type}
