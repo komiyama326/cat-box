@@ -4,6 +4,7 @@ from typing import List
 import shutil
 import os
 import zipfile # zipファイル操作のため
+import subprocess # 将来のウイルススキャン連携用
 
 # 同じディレクトリにあるmodels.pyからAppモデルをインポート
 from .models import App
@@ -81,6 +82,47 @@ async def get_apps():
     """
     return dummy_apps_db
 
+# --- ヘルパー関数 ---
+def run_virus_scan(file_path: str) -> bool:
+    """
+    指定されたファイルに対してウイルススキャンを実行する（という想定のダミー関数）。
+    将来的にはここでClamAVなどのスキャンコマンドを呼び出す。
+    
+    :param file_path: スキャン対象のファイルパス
+    :return: 安全であればTrue, ウイルスが検出されればFalseを返す
+    """
+    print(f"--- Running dummy virus scan on {file_path} ---")
+    # 【本番実装の例】
+    # try:
+    #     result = subprocess.run(
+    #         ['clamscan', '--stdout', '--no-summary', file_path],
+    #         capture_output=True, text=True, check=True
+    #     )
+    #     # "OK" という文字列が含まれていれば安全とみなす
+    #     if "OK" in result.stdout:
+    #         print("--- Scan result: OK ---")
+    #         return True
+    #     else:
+    #         print(f"--- Scan result: VIRUS DETECTED --- \n{result.stdout}")
+    #         return False
+    # except FileNotFoundError:
+    #     print("--- WARNING: clamscan command not found. Skipping virus scan. ---")
+    #     return True # 開発環境ではスキャンをスキップ
+    # except subprocess.CalledProcessError as e:
+    #     # clamscanはウイルスを検知すると終了コードが1になるため、ここで検知する
+    #     if e.returncode == 1:
+    #         print(f"--- Scan result: VIRUS DETECTED --- \n{e.stdout}")
+    #         return False
+    #     else:
+    #         print(f"--- ERROR: Virus scan failed with code {e.returncode} --- \n{e.stderr}")
+    #         # スキャン自体が失敗した場合は、安全のためNGとするか、管理者に通知する
+    #         return False
+    
+    # 【現在のダミー実装】
+    # 常に安全であると仮定してTrueを返す
+    print("--- Scan result: OK (Dummy) ---")
+    return True
+
 @app.post("/api/v1/apps/upload")
 async def upload_app(file: UploadFile = File(...)):
     """
@@ -137,6 +179,14 @@ async def upload_app(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="Invalid zip file.")
         # --- zip内部の検証ロジックここまで ---
 
+        # --- ここからウイルススキャン ---
+        if not run_virus_scan(temp_file_path):
+            raise HTTPException(
+                status_code=400,
+                detail="A virus was detected in the uploaded file."
+            )
+        # --- ウイルススキャンここまで ---
+
         print(f"Received file: {file.filename}")
         print(f"Content-Type: {file.content_type}")
         print(f"File size: {file_size} bytes")
@@ -149,4 +199,4 @@ async def upload_app(file: UploadFile = File(...)):
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
 
-    return {"filename": file.filename, "content_type": file.content_type, "size": file_size, "inspection_status": "passed"}
+    return {"filename": file.filename, "content_type": file.content_type, "size": file_size, "inspection_status": "passed", "virus_scan_status": "passed"}
