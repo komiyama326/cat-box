@@ -3,14 +3,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 import shutil
 import os
+import zipfile # zipファイル操作のため
 
 # 同じディレクトリにあるmodels.pyからAppモデルをインポート
 from .models import App
 
 # --- 定数を定義 ---
-# 将来的に設定ファイルに移動することも検討
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
-UPLOAD_DIR = "uploads" # アップロードされたファイルを一時的に保存するディレクトリ
+MAX_FILES_IN_ZIP = 100 # zip内のファイル数上限
+ALLOWED_EXTENSIONS = {'.py', '.txt', '.md', '.json', '.ui', '.qss', '.png', '.jpg', '.jpeg', '.gif'} # 許可する拡張子
+UPLOAD_DIR = "uploads"
 
 # サーバー起動時にアップロード用ディレクトリを作成
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -83,42 +85,68 @@ async def get_apps():
 async def upload_app(file: UploadFile = File(...)):
     """
     アプリケーションのzipファイルをアップロードします。
-    ファイルサイズとコンテントタイプの検証を追加。
+    ファイルサイズ、コンテントタイプ、zip内部の検証を追加。
     """
-    # Content-Typeの検証
     if file.content_type not in ["application/zip", "application/x-zip-compressed"]:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid file type: {file.content_type}. Only .zip files are allowed."
         )
 
-    # 一時ファイルに保存してサイズをチェック
     temp_file_path = os.path.join(UPLOAD_DIR, file.filename)
     try:
-        # ファイルをチャンクで書き込む
         with open(temp_file_path, "wb") as buffer:
-            # shutil.copyfileobjはメモリを大量に消費しないため安全
             shutil.copyfileobj(file.file, buffer)
 
         file_size = os.path.getsize(temp_file_path)
         if file_size > MAX_FILE_SIZE:
             raise HTTPException(
-                status_code=413, # Payload Too Large
+                status_code=413,
                 detail=f"File size {file_size / 1024 / 1024:.2f} MB exceeds the limit of {MAX_FILE_SIZE / 1024 / 1024} MB."
             )
+
+        # --- ここからzip内部の検証ロジック ---
+        print(f"Inspecting zip file: {temp_file_path}")
+        try:
+            with zipfile.ZipFile(temp_file_path, 'r') as zip_ref:
+                # 1. ファイル数の検証
+                file_list = zip_ref.infolist()
+                if len(file_list) > MAX_FILES_IN_ZIP:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Too many files in zip. Exceeds the limit of {MAX_FILES_IN_ZIP} files."
+                    )
+                
+                # 2. 拡張子の検証
+                for file_info in file_list:
+                    # ディレクトリはスキップ
+                    if file_info.is_dir():
+                        continue
+                    
+                    # ファイル名から拡張子を取得
+                    _, extension = os.path.splitext(file_info.filename)
+                    if not extension or extension.lower() not in ALLOWED_EXTENSIONS:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Disallowed file type found in zip: {file_info.filename}"
+                        )
+                        
+                print("Zip file inspection passed.")
+
+        except zipfile.BadZipFile:
+            raise HTTPException(status_code=400, detail="Invalid zip file.")
+        # --- zip内部の検証ロジックここまで ---
 
         print(f"Received file: {file.filename}")
         print(f"Content-Type: {file.content_type}")
         print(f"File size: {file_size} bytes")
-
-        # ここに今後、zip内の検証ロジックを追加していく
+        
+        # 検証が終わったら、本来はここでファイルを永続的なストレージ(S3など)に移動する
+        # 今はまだ何もしない
 
     finally:
-        # FastAPIはUploadFileを自動で閉じるが、shutilで使ったファイルポインタは念のため閉じる
         file.file.close()
-        # 一時ファイルを削除（今はまだ検証だけなので）
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
 
-
-    return {"filename": file.filename, "content_type": file.content_type, "size": file_size}
+    return {"filename": file.filename, "content_type": file.content_type, "size": file_size, "inspection_status": "passed"}
