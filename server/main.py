@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 import shutil
@@ -7,8 +7,18 @@ import zipfile # zipファイル操作のため
 import subprocess # 将来のウイルススキャン連携用
 import hashlib # ハッシュ値計算のため
 
+# SQLAlchemyのセッション型をインポート
+from sqlalchemy.orm import Session
+
+# 作成したモジュールをインポート
+from . import crud, models, security
+from .database import SessionLocal, engine
+
 # 同じディレクトリにあるmodels.pyからAppモデルをインポート
-from .models import App
+#from .models import App
+
+# サーバー起動時にテーブルを自動作成する（Alembicを使うので通常は不要だが、開発初期には便利）
+# models.Base.metadata.create_all(bind=engine)
 
 # --- 定数を定義 ---
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
@@ -49,44 +59,34 @@ app.add_middleware(
 )
 # --- CORS設定ここまで ---
 
-# --- ダミーデータ ---
-# ステップ1-2で定義したAppモデルに従った、ハードコードされたデータ。
-# 本来はデータベースから取得するが、今は仮のデータを用意する。
-dummy_apps_db = [
-    App(
-        id=1,
-        name="Super Shift App",
-        version="1.0.0",
-        description="A revolutionary application for managing your work shifts with ease.",
-        icon_url="https://placekitten.com/200/200", # かわいい猫のダミー画像
-        download_url="https://cat-box-apps-19940623.s3.ap-northeast-1.amazonaws.com/dummy_app.zip"
-    ),
-    App(
-        id=2,
-        name="Simple Memo Pad",
-        version="0.9.1",
-        description="A very simple memo pad. That's it.",
-        icon_url="https://placekitten.com/201/201",
-        download_url="https://cat-box-apps-19940623.s3.ap-northeast-1.amazonaws.com/dummy_app.zip"
-    ),
-    App(
-        id=3,
-        name="Weather Cat",
-        version="1.2.0",
-        description=None, # OptionalなフィールドはNoneでもOK
-        icon_url="https://placekitten.com/202/202",
-        download_url="https://cat-box-apps-19940623.s3.ap-northeast-1.amazonaws.com/dummy_app.zip"
-    ),
-]
-# --- ダミーデータここまで ---
+# --- DBセッション管理 ---
+from .database import SessionLocal
 
+def get_db():
+    """
+    APIリフクエストのライフサイクル中にデータベースセッションを提供する依存性。
+    リクエストの開始時にセッションを生成し、
+    リクエストの終了後（成功・失敗問わず）にセッションを閉じる。
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+# --- DBセッション管理ここまで ---
 
-@app.get("/api/v1/apps", response_model=List[App])
-async def get_apps():
+# 新しく追加するCRUD関数をインポート
+from . import crud, models, security
+
+@app.get("/api/v1/apps/", response_model=List[models.AppSchema])
+def read_apps(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """
-    登録されている全てのアプリケーションのリストを取得します。
+    登録されているアプリケーションのリストをデータベースから取得します。
     """
-    return dummy_apps_db
+    apps = crud.get_apps(db, skip=skip, limit=limit)
+    return apps
+
+# 既存の @app.post("/api/v1/users/", ... ) の前にこのエンドポイントを置く
 
 # --- ヘルパー関数 ---
 def run_virus_scan(file_path: str) -> bool:
@@ -244,3 +244,23 @@ async def upload_app(file: UploadFile = File(...)):
             os.remove(temp_file_path)
 
     return {"filename": file.filename, "content_type": file.content_type, "size": file_size, "inspection_status": "passed", "virus_scan_status": "passed", "hash_check_status": "passed"}
+
+# (upload_app エンドポイントの下に追記)
+
+@app.post("/api/v1/users/", response_model=models.UserSchema)
+def create_user(user: models.UserCreate, db: Session = Depends(get_db)):
+    """
+    新しいユーザーを作成（ユーザー登録）
+    """
+    # 既に同じメールアドレスのユーザーがいないかチェック
+    db_user = crud.get_user_by_email(db, email=user.email)
+    if db_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    # 既に同じユーザー名のユーザーがいないかチェック
+    db_user_by_username = crud.get_user_by_username(db, username=user.username)
+    if db_user_by_username:
+        raise HTTPException(status_code=400, detail="Username already registered")
+
+    # 新しいユーザーをデータベースに作成
+    return crud.create_user(db=db, user=user)    

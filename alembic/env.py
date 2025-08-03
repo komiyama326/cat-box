@@ -6,24 +6,13 @@ from sqlalchemy import pool
 from alembic import context
 
 import os
-from dotenv import load_dotenv
-
-# .envファイルを読み込む
-load_dotenv()
-
-# プロジェクトのBaseモデルをインポート
-# sys.pathを追加して、serverディレクトリをインポートパスに含める
 import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from server.database import Base 
+sys.path.append(os.getcwd())
+from server.models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
-
-# .iniファイルに環境変数を反映させる
-# これにより alembic.ini の sqlalchemy.url = ${DATABASE_URL} が解決される
-config.set_main_option('sqlalchemy.url', os.getenv('DATABASE_URL'))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
