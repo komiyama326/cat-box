@@ -1,4 +1,6 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Request
+from fastapi.responses import HTMLResponse # Response を HTMLResponse に変更しても良い
+from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 import shutil
@@ -38,7 +40,8 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # FastAPIアプリケーションのインスタンスを作成
 app = FastAPI(title="Cat-box API")
 
-# app = FastAPI(...) の下に追記
+# テンプレート設定 ---
+templates = Jinja2Templates(directory="server/templates")
 
 # --- CORS設定 ---
 # 開発中にローカルのフロントエンドやランチャーからアクセスできるようにするため、
@@ -74,6 +77,26 @@ def get_db():
     finally:
         db.close()
 # --- DBセッション管理ここまで ---
+
+# --- 【ここから追記】 Webページ表示用エンドポイント ---
+
+@app.get("/", response_class=HTMLResponse)
+def read_root(request: Request, db: Session = Depends(get_db)):
+    """
+    トップページ (アプリ一覧) を表示する。
+    """
+    # データベースからアプリ一覧を取得
+    apps = crud.get_apps(db)
+    
+    # テンプレートに渡すデータを準備
+    context = {
+        "request": request,
+        "apps": apps
+    }
+    # テンプレートを使ってHTMLを生成して返す
+    return templates.TemplateResponse("index.html", context)
+
+# --- 【ここまで追記】 ---
 
 # 新しく追加するCRUD関数をインポート
 from . import crud, models, security
