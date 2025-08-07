@@ -1,7 +1,9 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Request, Form, Response
 from fastapi.responses import HTMLResponse # Response を HTMLResponse に変更しても良い
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordRequestForm 
+from datetime import timedelta 
 from typing import List
 import shutil
 import os
@@ -78,7 +80,7 @@ def get_db():
         db.close()
 # --- DBセッション管理ここまで ---
 
-# --- 【ここから追記】 Webページ表示用エンドポイント ---
+#  Webページ表示用エンドポイント ---
 
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request, db: Session = Depends(get_db)):
@@ -96,7 +98,34 @@ def read_root(request: Request, db: Session = Depends(get_db)):
     # テンプレートを使ってHTMLを生成して返す
     return templates.TemplateResponse("index.html", context)
 
-# --- 【ここまで追記】 ---
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request):
+    """ログインページを表示する"""
+    return templates.TemplateResponse("login.html", {"request": request})
+
+@app.post("/login", response_class=HTMLResponse)
+async def handle_login(request: Request, db: Session = Depends(get_db), username: str = Form(), password: str = Form()):
+    """ログインフォームからの送信を処理する"""
+    try:
+        # トークン発行APIを呼び出すのと同じロジック
+        user = crud.get_user_by_email(db, email=username)
+        if not user or not security.verify_password(password, user.hashed_password):
+            raise Exception("メールアドレスまたはパスワードが間違っています。")
+
+        # ログイン成功
+        access_token_expires = timedelta(minutes=security.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = security.create_access_token(
+            data={"sub": user.email}, expires_delta=access_token_expires
+        )
+        
+        # トークンをCookieにセットしてトップページにリダイレクト
+        response = templates.TemplateResponse("redirect.html", {"request": request, "message": "ログインに成功しました！", "redirect_url": "/"})
+        response.set_cookie(key="access_token", value=f"Bearer {access_token}", httponly=True)
+        return response
+
+    except Exception as e:
+        # ログイン失敗
+        return templates.TemplateResponse("login.html", {"request": request, "error": str(e)})
 
 # 新しく追加するCRUD関数をインポート
 from . import crud, models, security
@@ -287,3 +316,28 @@ def create_user(user: models.UserCreate, db: Session = Depends(get_db)):
 
     # 新しいユーザーをデータベースに作成
     return crud.create_user(db=db, user=user)    
+
+@app.post("/api/v1/token")
+def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    """
+    ユーザー名とパスワードで認証し、アクセストークンを発行する。
+    """
+    # ユーザーをメールアドレス（ユーザー名として使用）で検索
+    user = crud.get_user_by_email(db, email=form_data.username)
+    
+    # ユーザーが存在しない、またはパスワードが間違っている場合
+    if not user or not security.verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=401, # Unauthorized
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # アクセストークンを生成
+    access_token_expires = timedelta(minutes=security.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = security.create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
+    )
+    
+    # トークンを返す
+    return {"access_token": access_token, "token_type": "bearer"}
