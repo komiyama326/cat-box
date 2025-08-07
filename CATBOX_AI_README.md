@@ -8,6 +8,7 @@
 ## クイックリファレンス
 
 - **プロジェクトの全体像を知りたい:** `.catbox_docs/00_project/01_concept.md`
+- **【重要】セキュリティの基本方針:** `.catbox_docs/00_project/02_security_guideline.md`
 - **サーバーサイドのAPIについて:** `.catbox_docs/01_server_design/01_api_design.md`
 - **データベースのテーブル設計:** `.catbox_docs/01_server_design/02_database_design.md`
 - **ランチャーの画面構成:** `.catbox_docs/02_launcher_design/01_ui_design.md`

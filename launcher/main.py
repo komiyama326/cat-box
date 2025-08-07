@@ -7,8 +7,9 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, QObject, Signal, Slot
 
-# 作成したAPIクライアントをインポート
+# 作成したAPIクライアントと認証ダイアログをインポート
 from api_client import ApiClient
+from auth_dialog import AuthDialog # この行を追記
 
 # --- バックグラウンドでAPI通信を行うワーカークラス ---
 class ApiWorker(QObject):
@@ -84,7 +85,22 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         top_splitter = QSplitter(Qt.Horizontal)
-        
+
+        # --- 【ここから追記】トップバーの作成 ---
+        top_bar_widget = QWidget()
+        top_bar_layout = QHBoxLayout(top_bar_widget)
+        top_bar_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.account_button = QPushButton("アカウント")
+        self.account_button.clicked.connect(self.open_auth_dialog)
+
+        top_bar_layout.addStretch() # ボタンを右に寄せるためのスペーサー
+        top_bar_layout.addWidget(self.account_button)
+        # --- 【ここまで追記】 ---
+
+        # メインのスプリッター
+        top_splitter = QSplitter(Qt.Horizontal)
+
         # 左側: アプリ一覧
         self.app_list_widget = QListWidget()
         self.app_list_widget.currentItemChanged.connect(self._on_app_selection_changed) # アイテム選択時の処理を接続
@@ -116,6 +132,7 @@ class MainWindow(QMainWindow):
 
         # 全体のレイアウト
         main_layout = QVBoxLayout(central_widget)
+        main_layout.addWidget(top_bar_widget) # 【追記】トップバーをレイアウトに追加
         main_layout.addWidget(top_splitter)
         main_layout.addWidget(self.log_text_edit)
 
@@ -123,6 +140,18 @@ class MainWindow(QMainWindow):
         self.setup_api_worker()
         self.log("ランチャーを起動しました。")
         self.fetch_apps() # ランチャー起動時にアプリ取得を開始
+
+    # --- open_auth_dialog メソッドの追加 ---
+    @Slot()
+    def open_auth_dialog(self):
+        """アカウントダイアログを開く"""
+        dialog = AuthDialog(self)
+        # ダイアログがどのように閉じられたかによって処理を分岐することも可能
+        # if dialog.exec():
+        #     self.log("認証に成功しました。")
+        # else:
+        #     self.log("認証ダイアログが閉じられました。")
+        dialog.exec() # ダイアログを実行
 
     def setup_api_worker(self):
         """ワーカースレッドとシグナル・スロットを設定する"""

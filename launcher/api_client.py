@@ -4,7 +4,7 @@ from typing import List, Dict, Any
 # サーバーの公開URL。将来的には設定ファイルなどから読み込むのが望ましい。
 # あなたのRender.comのAPIのURLに書き換えてください。
 # 例: "https://cat-box-api.onrender.com"
-BASE_URL = "https://cat-box-api.onrender.com" 
+BASE_URL = "http://127.0.0.1:8000"
 
 class ApiClient:
     """
@@ -45,6 +45,34 @@ class ApiClient:
             print(f"APIへのリクエストに失敗しました: {e}")
             # エラーを呼び出し元に再度投げる
             raise
+
+    def create_user(self, username, email, password):
+        """
+        新しいユーザーを登録する
+        :return: 成功した場合はユーザー情報(dict), 失敗した場合はNone
+        """
+        url = f"{self.base_url}/api/v1/users/"
+        payload = {
+            "email": email,
+            "username": username,
+            "password": password
+        }
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            
+            # ステータスコードに応じたハンドリング
+            if response.status_code == 200:
+                # 成功
+                return response.json()
+            else:
+                # サーバーからエラーメッセージが返ってきた場合
+                error_data = response.json()
+                # "detail"キーがあればその値を、なければレスポンス全体を返す
+                raise Exception(error_data.get("detail", str(error_data)))
+
+        except requests.exceptions.RequestException as e:
+            # ネットワークエラーなど
+            raise Exception(f"APIへの接続に失敗しました: {e}")
 
 # このファイルが直接実行された場合に動作テストを行うためのコード
 if __name__ == "__main__":
