@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse # Response を HTML
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm 
-from datetime import timedelta 
+from datetime import timedelta, datetime
 from typing import List, Optional
 import shutil
 import os
@@ -240,14 +240,33 @@ async def handle_app_upload(
 
         print("ファイル検証OK")
         
-        #
-        # --- ここからステップ7-5の領域 ---
-        # TODO: ファイルを永続ストレージ(S3など)にアップロードする
-        # TODO: Appモデルをデータベースに保存する
-        #
+        # 1. (仮)永続ストレージへのアップロードとURL取得
+        # 本来はここでS3などにアップロードし、そのURLを取得する。
+        # 今回はダミーのURLを生成する。
+        # ファイル名を少しユニークにする（本来はUUIDなどが望ましい）
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        unique_filename = f"{timestamp}_{app_file.filename}"
+        dummy_download_url = f"https://cat-box-apps-dummy.s3.amazonaws.com/{unique_filename}"
+        print(f"ダミーのダウンロードURLを生成: {dummy_download_url}")
         
-        # 現時点では、検証成功メッセージを表示するだけ
-        context["upload_success"] = f"アプリ '{name}' (v{version}) のアップロードを受け付けました！"
+        # 2. データベースに保存するためのデータを準備
+        app_data = {
+            "name": name,
+            "version": version,
+            "description": description,
+            "download_url": dummy_download_url
+        }
+        
+        # 3. CRUD関数を呼び出してデータベースにアプリ情報を保存
+        crud.create_app_for_user(db=db, app_data=app_data, user_id=current_user.id)
+        
+        # 4. 成功メッセージを更新
+        context["upload_success"] = f"アプリ '{name}' (v{version}) の登録が完了しました！"
+        
+        # 5. ユーザー情報をリフレッシュして、新しいアプリが一覧に表示されるようにする
+        #    セッションをexpireして再読み込みさせる
+        db.expire(current_user)
+        context["current_user"] = db.query(models.User).filter(models.User.id == current_user.id).one()
 
     except Exception as e:
         context["upload_error"] = f"アップロード中にエラーが発生しました: {e}"

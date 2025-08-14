@@ -30,3 +30,21 @@ def create_user(db: Session, user: models.UserCreate):
     db.commit()      # データベースにコミット（書き込み）
     db.refresh(db_user) # DBから最新の状態（自動採番されたIDなど）を再取得
     return db_user
+
+def create_app_for_user(db: Session, app_data: dict, user_id: int):
+    """
+    指定されたユーザーのために新しいアプリを作成する
+    """
+    # データベースに保存するためのAppモデルインスタンスを作成
+    db_app = models.App(
+        name=app_data['name'],
+        version=app_data['version'],
+        description=app_data.get('description'),
+        download_url=app_data['download_url'], # 将来的にはS3のURLが入る
+        owner_id=user_id
+        # icon_url, app_type, status などはデフォルト値が使われる
+    )
+    db.add(db_app)
+    db.commit()
+    db.refresh(db_app)
+    return db_app
