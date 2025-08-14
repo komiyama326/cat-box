@@ -1,5 +1,5 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Request, Form, Response
-from fastapi.responses import HTMLResponse # Response を HTMLResponse に変更しても良い
+from fastapi.responses import HTMLResponse, RedirectResponse # Response を HTMLResponse に変更しても良い
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm 
@@ -171,6 +171,32 @@ async def handle_login(request: Request, db: Session = Depends(get_db), username
 
 # 新しく追加するCRUD関数をインポート
 from . import crud, models, security
+
+@app.get("/mypage", response_class=HTMLResponse)
+async def mypage(request: Request, current_user: Optional[models.User] = Depends(get_current_user_from_cookie)):
+    """
+    マイページを表示する。
+    ログインしていない場合はログインページにリダイレクトする。
+    """
+    if current_user is None:
+        # ログインしていない場合、ログインページへリダイレクト
+        return RedirectResponse(url="/login", status_code=302)
+
+    # ログインしている場合、ユーザー情報をテンプレートに渡して表示
+    context = {
+        "request": request,
+        "current_user": current_user
+    }
+    return templates.TemplateResponse("mypage.html", context)
+
+@app.post("/logout")
+async def logout(response: Response):
+    """
+    ログアウト処理。Cookieを削除してトップページにリダイレクトする。
+    """
+    response = RedirectResponse(url="/", status_code=302)
+    response.delete_cookie(key="access_token")
+    return response
 
 @app.get("/api/v1/apps/", response_model=List[models.AppSchema])
 def read_apps(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):

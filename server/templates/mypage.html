@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>マイページ - Cat-box</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; }
+        .user-info { background: #eef; padding: 1em; border-radius: 8px; }
+        .logout-btn { margin-top: 1em; }
+    </style>
+</head>
+<body>
+    <h1>マイページ</h1>
+
+    <div class="user-info">
+        <p>ようこそ、<strong>{{ current_user.username }}</strong> さん！</p>
+        <p>メールアドレス: {{ current_user.email }}</p>
+        <p>現在のプラン: {{ current_user.plan }}</p>
+        <p>保有ポイント: {{ current_user.points }} pt</p>
+    </div>
+
+    <div class="app-management">
+        <h2>あなたのアプリ</h2>
+        {% if current_user.apps %}
+            <ul>
+                {% for app in current_user.apps %}
+                    <li>{{ app.name }} (v{{ app.version }})</li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p>まだ登録したアプリはありません。</p>
+        {% endif %}
+    </div>
+
+    <form action="/logout" method="post">
+        <button type="submit" class="logout-btn">ログアウト</button>
+    </form>
+    
+</body>
+</html>
