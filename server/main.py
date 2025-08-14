@@ -198,6 +198,66 @@ async def logout(response: Response):
     response.delete_cookie(key="access_token")
     return response
 
+@app.post("/mypage/apps/upload", response_class=HTMLResponse)
+async def handle_app_upload(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user_from_cookie),
+    name: str = Form(),
+    version: str = Form(),
+    description: Optional[str] = Form(None),
+    app_file: UploadFile = File(...)
+):
+    """
+    マイページのアプリ登録フォームからの送信を処理する。
+    """
+    # ログインしていない場合はエラー（基本的には通らないはずだが念のため）
+    if current_user is None:
+        return RedirectResponse(url="/login", status_code=302)
+
+    context = {"request": request, "current_user": current_user}
+
+    try:
+        # 以前作成したアップロード検証ロジックをここで実行
+        # (簡単のため、upload_app関数の中身をここに展開・統合する)
+
+        # 1. Content-Typeの検証
+        if app_file.content_type not in ["application/zip", "application/x-zip-compressed"]:
+            raise ValueError(f"不正なファイル形式です: {app_file.content_type}")
+
+        # 2. 一時ファイルに保存
+        temp_file_path = os.path.join(UPLOAD_DIR, app_file.filename)
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(app_file.file, buffer)
+
+        # 3. ファイルサイズの検証
+        file_size = os.path.getsize(temp_file_path)
+        if file_size > MAX_FILE_SIZE:
+            raise ValueError(f"ファイルサイズが上限 ({MAX_FILE_SIZE / 1024 / 1024} MB) を超えています。")
+        
+        # (zip内部走査、ウイルススキャン、ハッシュチェックなどのロジックもここに統合可能)
+        # ... 今回は簡単のため、主要なチェックのみ実装 ...
+
+        print("ファイル検証OK")
+        
+        #
+        # --- ここからステップ7-5の領域 ---
+        # TODO: ファイルを永続ストレージ(S3など)にアップロードする
+        # TODO: Appモデルをデータベースに保存する
+        #
+        
+        # 現時点では、検証成功メッセージを表示するだけ
+        context["upload_success"] = f"アプリ '{name}' (v{version}) のアップロードを受け付けました！"
+
+    except Exception as e:
+        context["upload_error"] = f"アップロード中にエラーが発生しました: {e}"
+    finally:
+        # 一時ファイルを削除
+        if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+
+    return templates.TemplateResponse("mypage.html", context)
+
 @app.get("/api/v1/apps/", response_model=List[models.AppSchema])
 def read_apps(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """

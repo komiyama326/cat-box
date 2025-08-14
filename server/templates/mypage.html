@@ -32,6 +32,38 @@
         {% endif %}
     </div>
 
+    <hr style="margin: 2em 0;">
+
+    <div class="app-upload-form">
+        <h2>新しいアプリを登録する</h2>
+        {% if upload_error %}
+            <p style="color: red;">{{ upload_error }}</p>
+        {% endif %}
+        {% if upload_success %}
+            <p style="color: green;">{{ upload_success }}</p>
+        {% endif %}
+        
+        <form action="/mypage/apps/upload" method="post" enctype="multipart/form-data">
+            <div style="margin-bottom: 1em;">
+                <label for="name">アプリ名:</label><br>
+                <input type="text" id="name" name="name" required>
+            </div>
+            <div style="margin-bottom: 1em;">
+                <label for="version">バージョン:</label><br>
+                <input type="text" id="version" name="version" placeholder="例: 1.0.0" required>
+            </div>
+            <div style="margin-bottom: 1em;">
+                <label for="description">説明:</label><br>
+                <textarea id="description" name="description" rows="4" style="width: 100%;"></textarea>
+            </div>
+            <div style="margin-bottom: 1em;">
+                <label for="app_file">アプリファイル (.zip):</label><br>
+                <input type="file" id="app_file" name="app_file" accept=".zip" required>
+            </div>
+            <button type="submit">アプリを登録する</button>
+        </form>
+    </div>
+
     <form action="/logout" method="post">
         <button type="submit" class="logout-btn">ログアウト</button>
     </form>
