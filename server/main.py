@@ -2,9 +2,9 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Request, 
 from fastapi.responses import HTMLResponse # Response を HTMLResponse に変更しても良い
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordRequestForm 
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm 
 from datetime import timedelta 
-from typing import List
+from typing import List, Optional
 import shutil
 import os
 import zipfile # zipファイル操作のため
@@ -23,6 +23,10 @@ from .database import SessionLocal, engine
 
 # サーバー起動時にテーブルを自動作成する（Alembicを使うので通常は不要だが、開発初期には便利）
 # models.Base.metadata.create_all(bind=engine)
+
+# --- 【認証スキームの定義 ---
+# この時点ではトークンURLを指定するだけ。実際の検証ロジックは get_current_user で実装。
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/token")
 
 # --- 定数を定義 ---
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
@@ -79,6 +83,44 @@ def get_db():
     finally:
         db.close()
 # --- DBセッション管理ここまで ---
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> Optional[models.User]:
+    """
+    トークンを検証し、現在のユーザーモデルを返す依存性。
+    認証できない場合はNoneを返す。
+    """
+    # この実装では、Swagger UIのAuthorizeボタンからはうまく動作しないが、
+    # Cookieからのトークン取得を優先するため、まずはこの形で実装する。
+    # ヘッダーから 'Bearer ' というプレフィックスを削除
+    if token.startswith("Bearer "):
+        token = token.split("Bearer ")[1]
+
+    email = security.verify_token(token)
+    if email is None:
+        return None # 認証失敗
+    
+    user = crud.get_user_by_email(db, email=email)
+    return user
+
+async def get_current_user_from_cookie(request: Request, db: Session = Depends(get_db)) -> Optional[models.User]:
+    """
+    Cookieからアクセストークンを読み取り、現在のユーザーを返す依存性。
+    認証できない場合はNoneを返す。
+    """
+    token = request.cookies.get("access_token")
+    if not token:
+        return None
+
+    # ヘッダーから 'Bearer ' というプレフィックスを削除
+    if token.startswith("Bearer "):
+        token = token.split("Bearer ")[1]
+
+    email = security.verify_token(token)
+    if email is None:
+        return None
+
+    user = crud.get_user_by_email(db, email=email)
+    return user
 
 #  Webページ表示用エンドポイント ---
 

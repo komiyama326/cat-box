@@ -35,3 +35,18 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+def verify_token(token: str) -> Optional[str]:
+    """アクセストークンを検証し、ペイロード（sub=email）を返す"""
+    try:
+        # トークンをデコード
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        # ペイロードからemailを取得
+        email: str = payload.get("sub")
+        if email is None:
+            # emailがなければ無効
+            return None
+        return email
+    except JWTError:
+        # デコードに失敗したら無効
+        return None
